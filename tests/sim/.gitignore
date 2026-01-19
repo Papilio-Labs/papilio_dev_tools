@@ -1,0 +1,17 @@
+# Simulation build artifacts
+*.vvp
+*.vcd
+*.out
+sim.vvp
+a.out
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

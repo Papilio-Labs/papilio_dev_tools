@@ -1,0 +1,37 @@
+{
+  "name": "papilio_dev_tools",
+  "version": "0.1.0",
+  "description": "Development infrastructure, testing frameworks, simulation skills, and debugging tools for Papilio library development",
+  "keywords": [
+    "papilio",
+    "development",
+    "testing",
+    "simulation",
+    "vcd",
+    "debugging",
+    "fpga",
+    "wishbone"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Papilio-Labs/papilio_dev_tools.git"
+  },
+  "authors": [
+    {
+      "name": "Papilio Project",
+      "url": "https://papilio.cc"
+    }
+  ],
+  "license": "MIT",
+  "frameworks": "*",
+  "platforms": "*",
+  "export": {
+    "include": [
+      "scripts/*",
+      "docs/*",
+      "tests/*",
+      "AI_SKILL.md",
+      "README.md"
+    ]
+  }
+}
