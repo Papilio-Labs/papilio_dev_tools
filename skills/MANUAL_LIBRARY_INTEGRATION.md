@@ -1,5 +1,22 @@
 # Manual Library Integration Skill
 
+## ⚠️ CRITICAL: Read AI_SKILL.md Files FIRST
+
+**STOP! Before writing ANY code, you MUST read these AI_SKILL.md files:**
+
+1. **`papilio_spi_slave/AI_SKILL.md`** - Get correct header name (it's `PapilioSPI.h`, NOT `PapilioSPISlave.h`)
+2. **`papilio_wishbone_bus/AI_SKILL.md`** - Get correct module name (it's `pwb_spi_wb_bridge`)
+3. **Target library's `AI_SKILL.md`** - Get exact class names, headers, and module names
+
+**DO NOT guess header names from library names!** Libraries are named `papilio_<name>` but headers may be different:
+- Library: `papilio_spi_slave` → Header: `PapilioSPI.h` (NOT PapilioSPISlave.h)
+- Library: `papilio_wishbone_bus` → Module: `pwb_spi_wb_bridge` (NOT spi_wb_bridge)
+- Library: `papilio_wishbone_rgb_led` → Header: `PapilioRGBLed.h` (check AI_SKILL.md to confirm)
+
+**Common failure mode**: Inferring names from library names causes compilation errors. Always check AI_SKILL.md.
+
+---
+
 ## Purpose
 
 This skill documents how to manually integrate Papilio Wishbone libraries into projects based on the `papilio_project_template`. Use this when the automatic library builder is disabled (`board_build.papilio_auto_builder = 0`) or when you need to understand the integration patterns.
@@ -16,6 +33,7 @@ This skill documents how to manually integrate Papilio Wishbone libraries into p
 - Papilio library added to `platformio.ini` under `lib_deps`
 - Understanding of Wishbone bus architecture (see `papilio_wishbone_bus` docs)
 - Familiarity with Verilog and C++ (for ESP32)
+- **YOU HAVE READ THE AI_SKILL.MD FILES** (see warning above)
 
 ## Library Integration Checklist
 
@@ -27,28 +45,93 @@ When adding a Papilio Wishbone library (e.g., `papilio_wishbone_register`), you 
 4. ✅ **FPGA constraints** - Add pin constraints (if library needs external I/O)
 5. ✅ **ESP32 main.cpp** - Add includes and initialization
 
+**Optional**: To enable CLI support (interactive commands via serial monitor):
+- 6. ✅ **Enable PapilioOS** - Add `#define ENABLE_PAPILIO_OS` and instantiate OS plugins
+
 ---
 
 ## Step-by-Step Integration Guide
 
+### Step 0: Review Library AI_SKILL.md
+
+**🎯 IMPORTANT: Before starting integration, review the AI_SKILL.md files!**
+
+**Required Reading:**
+1. **`papilio_wishbone_bus/AI_SKILL.md`** - For correct SPI-Wishbone bridge module name and interface
+2. **`papilio_spi_slave/AI_SKILL.md`** - For SPI protocol specifications and timing requirements
+3. **Target library `AI_SKILL.md`** - For library-specific integration details
+
+Each Papilio library includes an `AI_SKILL.md` file that contains critical integration information:
+- **Exact header file names** (e.g., `RGBLed.h` not `PapilioRgbLed.h`)
+- **Exact module names** (e.g., `pwb_spi_wb_bridge` not `simple_spi_wb_bridge` or `spi_wb_bridge`)
+- **Exact port names** (e.g., module uses `.spi_sclk()` not `.spi_sck()`)
+- **Module parameters** (check what parameters actually exist - don't assume)
+- **Register map with addresses** (base address, offset ranges)
+- **Module names** for CLI commands
+- **Hardware requirements** (pin assignments, external components)
+- **Gateware module details** (parameters, signals, instantiation examples)
+- **Example instantiation patterns**
+
+**⚠️ CRITICAL**: If AI_SKILL.md examples don't work, check the actual Verilog module definition:
+- Port names: Open `.pio/libdeps/fpga/<library>/gateware/<module>.v` and check the `module` declaration
+- Parameters: Verify which parameters actually exist in the module definition
+- Dependencies: Check for missing modules (e.g., `fifo_sync.v` needed by `pwb_spi_wb_bridge.v`)
+
+**Where to find them**:
+- In the library repo: `libs/papilio_<name>/AI_SKILL.md`
+- After PlatformIO downloads: `.pio/libdeps/<env>/papilio_<name>/AI_SKILL.md`
+- Reference implementation: `dev_wishbone_bus/libs/papilio_<name>/AI_SKILL.md`
+
+**Use AI_SKILL.md to determine**:
+- ESP32 class names: Check exact header names (may be `Papilio<Name>` or just `<Name>`)
+- Verilog module name: **ALWAYS check** - naming varies (`pwb_<name>`, `wb_<name>`, etc.)
+- Address requirements: base address alignment and range
+- Pin naming conventions for constraints
+
+**⚠️ Common Mistake**: Using outdated module names. Always verify current module names from AI_SKILL.md:
+- ✅ CORRECT: `pwb_spi_wb_bridge` (from papilio_wishbone_bus/AI_SKILL.md)
+- ❌ WRONG: `simple_spi_wb_bridge` (deprecated, removed)
+- ❌ WRONG: `spi_wb_bridge` (ambiguous, multiple modules with this name)
+
+---
+
 ### Step 1: Add Library to platformio.ini
 
-**Location**: `platformio.ini` → `[env:esp32]` → `lib_deps`
+**⚠️ IMPORTANT**: Add libraries to **BOTH** `[env:esp32]` and `[env:fpga]` sections!
 
-**Action**: Uncomment or add the library URL
+**Location 1**: `platformio.ini` → `[env:esp32]` → `lib_deps`
 
 ```ini
+[env:esp32]
+; ... other settings ...
 lib_deps = 
     https://github.com/Papilio-Labs/papilio_spi_slave.git
     https://github.com/Papilio-Labs/papilio_wishbone_bus.git
     https://github.com/Papilio-Labs/papilio_os.git
     ; Add additional Papilio peripheral libraries below:
     https://github.com/Papilio-Labs/papilio_wishbone_register.git  ; ← UNCOMMENTED
-    ; https://github.com/Papilio-Labs/papilio_wishbone_rgb_led.git
+    https://github.com/Papilio-Labs/papilio_wishbone_rgb_led.git
     ; https://github.com/Papilio-Labs/papilio_wishbone_bram.git
 ```
 
-**What this does**: PlatformIO will download the library and make it available to both ESP32 and FPGA builds.
+**Location 2**: `platformio.ini` → `[env:fpga]` → `lib_deps`
+
+```ini
+[env:fpga]
+; ... other settings ...
+; Download HDL sources for manual integration
+lib_deps = 
+    https://github.com/Papilio-Labs/papilio_spi_slave.git
+    https://github.com/Papilio-Labs/papilio_wishbone_bus.git
+    https://github.com/Papilio-Labs/papilio_wishbone_register.git  ; ← UNCOMMENTED
+    https://github.com/Papilio-Labs/papilio_wishbone_rgb_led.git
+```
+
+**Why both environments?**:
+- **ESP32**: Downloads firmware libraries (C++ headers and source)
+- **FPGA**: Downloads gateware libraries (Verilog HDL files)
+- PlatformIO isolates dependencies per environment
+- Without `lib_deps` in `[env:fpga]`, gateware files won't be available at `.pio/libdeps/fpga/`
 
 **Library metadata**: Each library includes `library.json` with a `papilio` section containing integration details:
 - HDL module information
@@ -146,8 +229,8 @@ wb_register_block #(
     .wb_dat_i(wb_dat_m2s[7:0]),    // Use lower 8 bits of data bus
     .wb_dat_o(wb_register_dat_s2m[7:0]),
     .wb_we_i(wb_we),
-    .wb_cyc_i(wb_cyc),
-    .wb_stb_i(wb_register_stb),    // Address-decoded strobe
+    .wb_cyc_i(wb_cyc & wb_register_stb),    // ⚠️ MUST AND with address decode
+    .wb_stb_i(wb_stb & wb_register_stb),    // ⚠️ MUST AND with address decode
     .wb_ack_o(wb_register_ack)
 );
 //# PAPILIO_AUTO_MODULE_INST_END
@@ -160,6 +243,32 @@ wb_register_block #(
 - **Clock/Reset**: Always connect `clk` and `rst`
 - **Parameters**: Set module parameters according to `library.json`
 
+**⚠️ CRITICAL: Wishbone CYC/STB Signal Routing**
+
+Peripheral modules **MUST** receive properly qualified Wishbone cycle and strobe signals:
+
+```verilog
+// ❌ WRONG - Will cause bus conflicts and peripherals won't respond
+.wb_cyc_i(wb_cyc),              // NEVER connect wb_cyc directly
+.wb_stb_i(wb_register_stb),     // This alone is insufficient
+
+// ✅ CORRECT - AND the signals with address decode
+.wb_cyc_i(wb_cyc & wb_register_stb),   // Qualify wb_cyc with address select
+.wb_stb_i(wb_stb & wb_register_stb),   // Qualify wb_stb with address select
+```
+
+**Why this is critical**: 
+- Wishbone protocol requires peripherals to only respond when their address is selected
+- Without qualification, ALL peripherals see ALL transactions
+- This causes bus conflicts, incorrect data, and failed acknowledgements
+- Symptoms: reads return 0x00, writes don't stick, peripherals appear "dead"
+
+**The rule**: For EVERY peripheral module instantiation, ALWAYS use:
+```verilog
+.wb_cyc_i(wb_cyc & wb_<module>_stb),
+.wb_stb_i(wb_stb & wb_<module>_stb),
+```
+
 **Module naming convention**: Use `<library_name>_inst` pattern.
 
 #### Step 2d: Add Wishbone Interconnect Logic
@@ -167,6 +276,18 @@ wb_register_block #(
 **Marker region**: `//# PAPILIO_AUTO_WISHBONE_BEGIN` → `//# PAPILIO_AUTO_WISHBONE_END`
 
 **What to add**: Address decode logic and signal multiplexing
+
+**⚠️ PREREQUISITE**: Ensure these Wishbone bus signals are declared BEFORE the marker regions:
+```verilog
+wire [15:0] wb_adr;        // 16-bit address bus
+wire [31:0] wb_dat_m2s;    // Data from master to slave
+wire [31:0] wb_dat_s2m;    // Data from slave to master
+wire [3:0]  wb_sel;        // Byte lane select (REQUIRED for SPI bridge)
+wire        wb_we;         // Write enable
+wire        wb_cyc;        // Bus cycle active
+wire        wb_stb;        // Strobe (valid transfer)
+wire        wb_ack;        // Acknowledge
+```
 
 **Components needed**:
 1. **Address decode** - Generate strobe signals for each peripheral
@@ -178,8 +299,9 @@ wb_register_block #(
 //# PAPILIO_AUTO_WISHBONE_BEGIN
 // SPI-Wishbone Bridge (master)
 pwb_spi_wb_bridge #(
-    .ADDR_WIDTH(16),
-    .DATA_WIDTH(32)
+    .FIFO_DEPTH(64),
+    .ALMOST_FULL_THRESHOLD(4),
+    .ALMOST_EMPTY_THRESHOLD(4)
 ) spi_bridge (
     .clk(clk),
     .rst(rst),
@@ -196,7 +318,9 @@ pwb_spi_wb_bridge #(
     .wb_we_o(wb_we),
     .wb_cyc_o(wb_cyc),
     .wb_stb_o(wb_stb),
-    .wb_ack_i(wb_ack)
+    .wb_ack_i(wb_ack),
+    .fifo_rx_almost_full(),
+    .fifo_tx_almost_empty()
 );
 
 // Address Decode Logic
@@ -249,12 +373,28 @@ assign wb_dat_s2m = wb_register_stb ? {24'h0, wb_register_dat_s2m} :
 ```
 
 **Acknowledge multiplexing**:
+
+**For single peripheral**:
+```verilog
+assign wb_ack = wb_register_stb & wb_register_ack;
+```
+
+**For multiple peripherals (OR together)**:
+```verilog
+assign wb_ack = (wb_register_stb & wb_register_ack) |
+                (wb_bram_stb & wb_bram_ack) |
+                (wb_rgb_stb & wb_rgb_ack);
+```
+
+**Alternative ternary style** (less preferred but also correct):
 ```verilog
 assign wb_ack = wb_register_stb ? wb_register_ack :
                 wb_bram_stb     ? wb_bram_ack :
                 wb_rgb_stb      ? wb_rgb_ack :
                 1'b0;
 ```
+
+**Why the difference**: The OR-style explicitly shows all peripherals can acknowledge independently, while ternary implies priority. Both work, but OR-style is clearer for simultaneous multi-master designs.
 
 **Critical considerations**:
 - **Data width matching**: Pad narrow slaves (e.g., 8-bit → 32-bit) with zeros. Never drive the 32-bit shared bus directly with an 8-bit wire—always zero-extend.
@@ -270,7 +410,9 @@ assign wb_ack = wb_register_stb ? wb_register_ack :
 
 **What to add**: All Verilog source files from the library's `gateware/` directory
 
-**How to find files**: Check `library.json` → `papilio.gateware.modules[].file` or manually inspect `.pio/libdeps/<env>/<library>/gateware/`
+**How to find files**: Check `library.json` → `papilio.gateware.modules[].file` or manually inspect `.pio/libdeps/fpga/<library>/gateware/`
+
+**⚠️ Path Convention**: Use `../.pio/libdeps/fpga/` (relative from `fpga/` directory) to reference library HDL files. This assumes you added the library to `[env:fpga]` lib_deps in Step 1.
 
 **Example**: For `papilio_wishbone_register`:
 ```xml
@@ -283,29 +425,57 @@ assign wb_ack = wb_register_stb ? wb_register_ack :
         <File path="constraints/papilio_retrocade_base.cst" type="file.cst" enable="1" />
         
         <!-- Add library HDL files here -->
-        <File path="../../.pio/libdeps/fpga/papilio_wishbone_register/gateware/wb_register_block.v" 
+        <File path="../.pio/libdeps/fpga/papilio_wishbone_register/gateware/wb_register_block.v" 
               type="file.verilog" enable="1" />
     </FileList>
 </Project>
 ```
 
 **Path rules**:
-- Use relative paths from `fpga/` directory
-- Path format: `../../.pio/libdeps/<env>/<library>/gateware/<file>.v`
-- `<env>` is typically `fpga` for FPGA environment
+- Use relative paths from `fpga/` directory: `../.pio/libdeps/fpga/<library>/gateware/<file>.v`
+- Path format: `../.pio/libdeps/fpga/<library>/gateware/<file>.v` (one level up from fpga/ directory)
+- Libraries must be added to `[env:fpga]` lib_deps (see Step 1)
 - Attributes: `type="file.verilog"`, `enable="1"`
 
 **For multiple files**: Add one `<File>` entry per Verilog file
 
-**Example**: For `papilio_spi_slave` (multiple files):
+**Example**: For `papilio_wishbone_bus` (SPI-Wishbone bridge):
 ```xml
-<File path="../../.pio/libdeps/fpga/papilio_spi_slave/gateware/pwb_spi_wb_bridge.v" 
+<!-- SPI-Wishbone Bridge from papilio_wishbone_bus -->
+<!-- Note: pwb_spi_wb_bridge requires fifo_sync.v from papilio_spi_slave -->
+<File path="../.pio/libdeps/fpga/papilio_spi_slave/gateware/fifo_sync.v" 
       type="file.verilog" enable="1" />
-<File path="../../.pio/libdeps/fpga/papilio_spi_slave/gateware/spi_slave.v" 
-      type="file.verilog" enable="1" />
-<File path="../../.pio/libdeps/fpga/papilio_spi_slave/gateware/wb_master.v" 
+<File path="../.pio/libdeps/fpga/papilio_wishbone_bus/gateware/pwb_spi_wb_bridge.v" 
       type="file.verilog" enable="1" />
 ```
+
+**⚠️ IMPORTANT - Module Dependencies**: Some modules have dependencies on other libraries:
+- `pwb_spi_wb_bridge.v` requires `fifo_sync.v` from `papilio_spi_slave` library
+- Always check the module's AI_SKILL.md for dependency information
+- Add dependency files BEFORE the modules that use them
+
+**Example**: For multiple library files:
+```xml
+<!-- FIFO dependency (required by pwb_spi_wb_bridge) -->
+<File path="../.pio/libdeps/fpga/papilio_spi_slave/gateware/fifo_sync.v" 
+      type="file.verilog" enable="1" />
+
+<!-- Wishbone Bus Bridge -->
+<File path="../.pio/libdeps/fpga/papilio_wishbone_bus/gateware/pwb_spi_wb_bridge.v" 
+      type="file.verilog" enable="1" />
+
+<!-- Register Block -->  
+<File path="../.pio/libdeps/fpga/papilio_wishbone_register/gateware/wb_register_block.v" 
+      type="file.verilog" enable="1" />
+
+<!-- RGB LED Controller -->
+<File path="../.pio/libdeps/fpga/papilio_wishbone_rgb_led/gateware/wb_simple_rgb_led.v" 
+      type="file.verilog" enable="1" />
+<File path="../.pio/libdeps/fpga/papilio_wishbone_rgb_led/gateware/wb_rgb_led_ctrl.v" 
+      type="file.verilog" enable="1" />
+```
+
+**⚠️ Important**: Check each library's `gateware/` directory for the actual files needed. File names vary by library.
 
 **Verification**: After adding, run `pio run -e fpga` and check for missing file errors.
 
@@ -313,32 +483,28 @@ assign wb_ack = wb_register_stb ? wb_register_ack :
 
 ### Step 4: Add Pin Constraints (if needed)
 
-**Location**: `fpga/constraints/papilio_retrocade_base.cst` (or create library-specific `.cst` file)
-
 **When to add**: Only if the library connects to external hardware (LEDs, buttons, sensors, displays)
 
-**Constraint sources**: Check library's `gateware/constraints/<board>.cst` for reference pin assignments
+**Constraint sources**: Check library's `gateware/constraints/<library>_<board>.cst` for board-specific pin assignments
+
+**⚠️ IMPORTANT**: Do NOT merge library constraints into your base constraint file. Copy the library's constraint file as a separate file.
 
 **Example**: For `papilio_wishbone_rgb_led`:
 
-1. **Find library constraints**: `.pio/libdeps/fpga/papilio_wishbone_rgb_led/gateware/constraints/papilio_retrocade.cst`
+1. **Find library constraints**: 
+   - Location: `.pio/libdeps/fpga/papilio_wishbone_rgb_led/gateware/constraints/rgb_led_papilio_retrocade.cst`
+   - Check the library's `AI_SKILL.md` for correct constraint file name
 
-2. **Copy relevant constraints** to your project's `.cst` file:
-```plaintext
-//******************************************************************************
-// RGB LED Constraints
-// Library: papilio_wishbone_rgb_led
-//******************************************************************************
+2. **Copy constraint file to your project**:
+   ```bash
+   cp .pio/libdeps/fpga/papilio_wishbone_rgb_led/gateware/constraints/rgb_led_papilio_retrocade.cst fpga/constraints/
+   ```
 
-// RGB LED outputs (example pin assignments)
-IO_LOC "rgb_led_r[0]" A10;
-IO_PORT "rgb_led_r[0]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
-
-IO_LOC "rgb_led_r[1]" B10;
-IO_PORT "rgb_led_r[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
-
-// ... (continue for all RGB LED pins)
-```
+3. **Add to `fpga/project.gprj`** (see Step 3 for details):
+   ```xml
+   <File path="constraints/papilio_retrocade_base.cst" type="file.cst" enable="1" />
+   <File path="constraints/rgb_led_papilio_retrocade.cst" type="file.cst" enable="1" />
+   ```
 
 **Important notes**:
 - **Pin assignments**: Verify against your board's schematic
@@ -348,21 +514,42 @@ IO_PORT "rgb_led_r[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
 
 **Libraries without external I/O**: Libraries like `papilio_wishbone_register` and `papilio_wishbone_bram` don't need constraints (purely internal).
 
-**Constraint format**:
-```plaintext
-IO_LOC "signal_name" PIN_NUMBER;
-IO_PORT "signal_name" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
-```
+**Why separate constraint files**:
+- ✅ Prevents accidental pin conflicts
+- ✅ Easier to update when library changes
+- ✅ Clearer which pins belong to which library
+- ✅ Automatic builder can manage them independently
+- ❌ Do NOT copy constraints into `papilio_retrocade_base.cst`
 
-**Constraint file management**: Add new `.cst` files to `project.gprj`:
-```xml
-<File path="constraints/papilio_retrocade_base.cst" type="file.cst" enable="1" />
-<File path="constraints/rgb_led.cst" type="file.cst" enable="1" />
+**Constraint file naming convention**: `<library_function>_<board>.cst`
+- Example: `rgb_led_papilio_retrocade.cst`
+- Example: `display_papilio_synth.cst`
+
+**Signal name matching**: Constraint signal names MUST match `top.v` port declarations exactly:
+```verilog
+// top.v
+module top (
+    output wire led_out  // ← Signal name
+);
+
+// constraint file
+IO_LOC "led_out" P9;     // ← Must match exactly
 ```
 
 ---
 
 ### Step 5: Integrate into ESP32 main.cpp
+
+**⚠️ STOP! Before adding any #includes, complete this checklist:**
+
+- [ ] I have opened and read `papilio_spi_slave/AI_SKILL.md`
+- [ ] I know the exact header name for the SPI library (it's `PapilioSPI.h`)
+- [ ] I have opened and read `papilio_wishbone_bus/AI_SKILL.md`  
+- [ ] I have opened and read the target library's `AI_SKILL.md`
+- [ ] I know the exact header name(s) from the "ESP32 Basic Usage" or "Common Operations" section
+- [ ] I have verified the class names match the AI_SKILL.md examples
+
+**If you haven't read the AI_SKILL.md files, STOP and read them now. Do NOT guess header names.**
 
 **Location**: `src/main.cpp`
 
@@ -378,7 +565,14 @@ The template has **three marker regions** for auto-generated code:
 
 **What to add**: Include the library's header file(s)
 
-**How to find headers**: Check `library.json` → `papilio.esp32.headers[]`
+**📖 Reference**: Check the library's `AI_SKILL.md` for exact header names and include patterns.
+
+**⚠️ REQUIRED**: You MUST check AI_SKILL.md. Header names do NOT always match library names!
+
+**How to find headers**: 
+1. **Best**: Check `<library>/AI_SKILL.md` → "Common Operations" section
+2. **Alternative**: Check `library.json` → `papilio.esp32.headers[]`
+3. **Direct**: Look at `<library>/src/*.h` files
 
 **Example**: For `papilio_wishbone_register`:
 ```cpp
@@ -386,13 +580,35 @@ The template has **three marker regions** for auto-generated code:
 #include <SPI.h>
 #include <PapilioSPISlave.h>        // Core SPI bridge (always needed)
 #include <WishboneSPI.h>            // Helper functions (wishboneInit/read/write)
-#include <PapilioWbRegister.h>      // Register library (note: lowercase 'b')
+#include <PapilioWbRegister.h>      // Register library API
 //# PAPILIO_AUTO_INCLUDES_END
 ```
 
-**Include order**: Core libraries first, then peripheral libraries.
+**For PapilioOS CLI support**, add OS plugin headers:
+```cpp
+#define ENABLE_PAPILIO_OS  // Must be defined BEFORE any includes
 
-**⚠️ Important**: Always verify the exact class name and header file name from the library's `src/` directory. Class names are case-sensitive! Check `library.json` → `papilio.esp32.class_name` or look at the actual header files.
+//# PAPILIO_AUTO_INCLUDES_BEGIN
+#include <SPI.h>
+#include <PapilioSPISlave.h>
+#include <WishboneSPI.h>
+#include <PapilioOS.h>                  // CLI framework
+#include <PapilioWbRegister.h>          // Register library API
+#include <PapilioWbRegisterOS.h>        // Register CLI plugin
+//# PAPILIO_AUTO_INCLUDES_END
+
+#include <Arduino.h>
+```
+
+**Include order**: Core libraries first, then peripheral libraries, then OS plugins.
+
+**⚠️ Important**: Class names are case-sensitive! For example:
+- ✅ Correct: `PapilioRgbLedOS.h` 
+- ❌ Wrong: `RGBLedOS.h`
+- ✅ Correct: `PapilioWbRegister.h`
+- ❌ Wrong: `PapilioWBRegister.h`
+
+Always check the library's `AI_SKILL.md` or actual `src/*.h` files to verify exact names.
 
 **⚠️ Important**: `WishboneSPI.h` exposes *functions* such as `wishboneInit()`, `wishboneRead8()`, `wishboneWrite8()`, etc. There is no `WishboneSPI` class—do not try to instantiate one. Use the provided helper functions instead.
 
@@ -402,7 +618,12 @@ The template has **three marker regions** for auto-generated code:
 
 **What to add**: Declare global objects for the library
 
-**How to find details**: Check `library.json` → `papilio.esp32.class_name` and `constructor_args`
+**📖 Reference**: Check the library's `AI_SKILL.md` → "Common Operations" for constructor patterns and OS plugin instantiation.
+
+**How to find details**: 
+1. **Best**: Check `<library>/AI_SKILL.md` → Constructor examples
+2. **Alternative**: Check `library.json` → `papilio.esp32.class_name` and `constructor_args`
+3. **Direct**: Look at `<library>/src/*.h` constructor signatures
 
 **Example**: For `papilio_wishbone_register`:
 ```cpp
@@ -414,6 +635,27 @@ PapilioSPISlave spiBridge;
 PapilioWbRegister wbRegister(0x1000);  // 16-bit base address
 //# PAPILIO_AUTO_GLOBALS_END
 ```
+
+**For PapilioOS CLI support**, add OS plugin objects after the device objects:
+```cpp
+//# PAPILIO_AUTO_GLOBALS_BEGIN
+PapilioSPISlave spiBridge;
+
+// Device objects
+PapilioWbRegister wbRegister(0x1000);
+PapilioRgbLed rgbLed(0x0100);
+
+// OS plugin objects (auto-register via static constructors)
+PapilioWbRegisterOS wbRegisterOS(&wbRegister);  // Pass pointer to device
+PapilioRgbLedOS rgbLedOS(&rgbLed);              // Pass pointer to device
+//# PAPILIO_AUTO_GLOBALS_END
+```
+
+**OS Plugin Pattern**: 
+- Each library has a matching OS plugin class: `Papilio<Name>` → `Papilio<Name>OS`
+- OS plugins take a pointer to the device object: `new PapilioWbRegisterOS(&wbRegister)`
+- Plugins auto-register with PapilioOS via static constructors (no manual registration needed)
+- Plugins are only compiled when `ENABLE_PAPILIO_OS` is defined
 
 **Naming convention**: Use descriptive names with camelCase (e.g., `wbRegister`, `rgbLed`, `bram`)
 
@@ -450,6 +692,55 @@ wbRegister.begin();
 Serial.println("✓ Wishbone Register Block initialized at 0x1000");
 //# PAPILIO_AUTO_INIT_END
 ```
+
+**For PapilioOS CLI support**, add PapilioOS initialization:
+```cpp
+//# PAPILIO_AUTO_INIT_BEGIN
+// Configure SPI peripheral (pins vary by board)
+SPI.begin(SPI_SCK_PIN, SPI_MISO_PIN, SPI_MOSI_PIN, FPGA_CS_PIN);
+
+// Initialize Wishbone helper (must succeed before peripherals are used)
+if (!wishboneInit(&SPI, FPGA_CS_PIN)) {
+    Serial.println("ERROR: Wishbone bridge initialization failed!");
+    while (true) delay(1000);
+}
+Serial.println("✓ Wishbone SPI bridge ready");
+
+// Initialize peripherals
+wbRegister.begin();
+Serial.println("✓ Wishbone Register Block initialized at 0x1000");
+
+rgbLed.begin();
+Serial.println("✓ RGB LED initialized at 0x0100");
+//# PAPILIO_AUTO_INIT_END
+
+// Initialize Papilio OS (must be AFTER peripheral initialization)
+PapilioOS.begin();
+Serial.println("✓ PapilioOS ready - type 'menu' for commands\n");
+```
+
+**In `loop()` function**, add PapilioOS handler:
+```cpp
+void loop() {
+    // Handle PapilioOS commands (checks serial input, dispatches to modules)
+    PapilioOS.handle();
+    
+    // Your application code here
+    // (check PapilioOS.isInCLIMode() to avoid printing when user is typing)
+    
+    if (!PapilioOS.isInCLIMode()) {
+        // Your periodic status updates, animations, etc.
+    }
+    
+    delay(10);
+}
+```
+
+**PapilioOS CLI Commands**:
+- Type `menu` to see all registered modules
+- Type `<module> help` to see module commands (e.g., `register help`)
+- Type `<module> tutorial` for interactive step-by-step guide
+- Each library's OS plugin auto-registers its commands when instantiated
 
 **Initialization order**:
 1. **ESP32 SPI peripheral** – Configure pins and speed first.
@@ -773,8 +1064,9 @@ module top (
     
     //# PAPILIO_AUTO_WISHBONE_BEGIN
     pwb_spi_wb_bridge #(
-        .ADDR_WIDTH(16),
-        .DATA_WIDTH(32)
+        .FIFO_DEPTH(64),
+        .ALMOST_FULL_THRESHOLD(4),
+        .ALMOST_EMPTY_THRESHOLD(4)
     ) spi_bridge (
         .clk(clk),
         .rst(rst),
@@ -789,7 +1081,9 @@ module top (
         .wb_we_o(wb_we),
         .wb_cyc_o(wb_cyc),
         .wb_stb_o(wb_stb),
-        .wb_ack_i(wb_ack)
+        .wb_ack_i(wb_ack),
+        .fifo_rx_almost_full(),
+        .fifo_tx_almost_empty()
     );
     
     assign wb_register_stb = wb_stb && wb_cyc && (wb_adr[15:8] == 8'h10);
