@@ -19,13 +19,19 @@
 
 ## Purpose
 
-This skill documents how to manually integrate Papilio Wishbone libraries into projects based on the `papilio_project_template`. Use this when the automatic library builder is disabled (`board_build.papilio_auto_builder = 0`) or when you need to understand the integration patterns.
+For the [current Papilio project template](https://github.com/Papilio-Labs/papilio-project-template#readme), PlatformIO installs the libraries and adds their HDL sources. You write the FPGA wiring and the firmware calls. Do not add auto-builder markers or hand-edit the Gowin project to list library HDL.
 
-**Note**: The Papilio Automatic Library Builder (when `board_build.papilio_auto_builder = 1`) performs these steps automatically. This skill is for:
-- Manual integration when auto-builder is disabled
-- Understanding what the auto-builder does
-- Debugging integration issues
-- Creating custom integrations
+## Standard-Slot Integration and Driver Migration
+
+1. Add the library to the shared `lib_deps` list. Choose an unused standard slot in the configured `NUM_SLOTS` range, wire the module with `SLOT_CONNECT(slot, ...)`, and add pin constraints if needed. Slot 0 is reserved for system use.
+2. In firmware, pass that same slot number to drivers that support `fromSlot()`, for example `auto rgbLed = PapilioRGBLed::fromSlot(1);`. Call and check `rgbLed.begin()` after the template's existing `wishboneInit()`. Reuse that bus connection; do not declare another `SPIClass` or initialize the bus again for each peripheral.
+3. When migrating a driver, keep the raw byte-address constructor unchanged for existing callers and extended-tier devices. Add a named `fromSlot(int slot)` factory that uses `wishboneSlotBaseAddress()` from `WishboneSPI.h`. For a regular peripheral, reject slot 0 as well as out-of-range slots. Report invalid slots through `begin()` and prevent bus I/O for invalid instances. Do not reinterpret a literal like `Driver(1)` as a slot number.
+
+The helper calculates `slot * 0x100`; it cannot tell whether the FPGA has that slot wired or whether the intended device is in it. Verify that the firmware slot matches the gateware and that the driver builds against a Wishbone library revision that includes the helper.
+
+## Legacy Integration Reference
+
+The sections below describe older projects with manual Gowin source lists or auto-builder markers. Use the steps above for the current template.
 
 ## Prerequisites
 
